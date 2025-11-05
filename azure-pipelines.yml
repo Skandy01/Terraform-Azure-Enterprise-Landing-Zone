@@ -1,0 +1,42 @@
+trigger: none
+
+stages: 
+
+- stage: Build
+  displayName: Terraform_Infra_Build
+  pool: 
+  
+  jobs:
+
+  - job: Terraform_Installer
+    displayName: "Terraform Install"
+
+    steps: 
+    - task: TerraformInstaller@1
+      inputs:
+        terraformVersion: 'latest'
+
+  - job: Terraform_Initialization
+    displayName: "Terraform Init-Validate"
+    steps:
+    
+
+
+
+- stage:
+
+  jobs:
+  - job:
+
+- stage:
+  
+  jobs:
+  - job:
+
+- stage:
+  jobs:
+
+  - job:
+
+  - job:
+
