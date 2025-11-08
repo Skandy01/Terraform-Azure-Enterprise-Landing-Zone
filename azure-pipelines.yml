@@ -1,9 +1,15 @@
 trigger:
-  - feature
+  - feature/*
+  - main
+
+pr:
+  branches:
+    include:
+      - main
 
 pool: 'Self_Hosted_Pool'
 
-stages: 
+stages:
 
 - stage: Build
 
@@ -20,21 +26,10 @@ stages:
       inputs:
         terraformVersion: '1.7.5'
 
-    - task: TerraformTask@5
-      inputs:
-        provider: 'azurerm'
-        command: 'init'
-        workingDirectory: '$(System.DefaultWorkingDirectory)/Workspace/Env_Dev'
-        backendServiceArm: 'ADO'
-        backendAzureRmResourceGroupName: 'RG'
-        backendAzureRmStorageAccountName: 'persistentstate'
-        backendAzureRmContainerName: 'infra-state'
-        backendAzureRmKey: 'terraform.tfstate'
-
   - job: Terraform_Initialization
     dependsOn: Terraform_Installer
 
-    displayName: "Terraform Init-Validate"
+    displayName: "Terraform Init, Validate, Plan"
 
     steps:
   
@@ -53,6 +48,7 @@ stages:
       inputs:
         provider: 'azurerm'
         command: 'validate'
+        workingDirectory: '$(System.DefaultWorkingDirectory)/Workspace/Env_Dev'
 
     - task: TerraformTask@5
       inputs:
@@ -61,6 +57,7 @@ stages:
         outputTo: 'console'
         customCommand: 'fmt'
         environmentServiceNameAzureRM: 'ADO'
+        workingDirectory: '$(System.DefaultWorkingDirectory)/Workspace/Env_Dev'
     
     - task: TerraformTask@5
       inputs:
@@ -68,12 +65,13 @@ stages:
         command: 'plan'
         environmentServiceNameAzureRM: 'ADO'
         commandOptions: '-out=tfplan'
+        workingDirectory: '$(System.DefaultWorkingDirectory)/Workspace/Env_Dev'
 
     - publish: tfplan
       artifact: terraform_plan
 
 - stage: Static_Iac_Scan
-  displayName: Code_Scan
+  displayName: "IaC Security Scan"
 
   jobs:
   - job: CheckOv
@@ -90,25 +88,36 @@ stages:
     
 - stage: Approval_Gate
   dependsOn: 
-  - Static_Iac_Scan
   - Build
+  condition: and(eq(variables['Build.SourceBranch'], 'refs/heads/main'), eq(variables['Build.Reason'], 'IndividualCI'))
 
   jobs:
     - job: Manual_Validation
       displayName: "Manual_Aprroval"
+      timeoutInMinutes: 4320
+
       pool: server
+
       steps:
       - task: ManualValidation@1
         inputs:
           notifyUsers: 'devopscollab101@gmail.com'
           approvers: 'devopscollab101@gmail.com'
-          onTimeout: 'resume'
+          instructions: 'Please review the Terraform plan and approve deployment to Dev environment.'
+          onTimeout: 'reject'
 
 - stage: Deployment
-  dependsOn: Approval_Gate
+  dependsOn: "Terraform Apply"
+  condition: and(eq(variables['Build.SourceBranch'], 'refs/heads/main'), eq(variables['Build.Reason'], 'IndividualCI'))
+
   jobs:
+
   - job: Infra_Deployment
+    displayName: "Apply Terraform Changes"
     steps:
+    - task: TerraformInstaller@1
+      inputs:
+        terraformVersion: '1.7.5'
     - task: TerraformTask@5
       inputs:
         provider: 'azurerm'
@@ -120,13 +129,9 @@ stages:
         backendAzureRmStorageAccountName: 'persistentstate'
         backendAzureRmContainerName: 'infra-state'
         backendAzureRmKey: 'terraform.tfstate'
-
-    - task: TerraformTask@5
-      inputs:
-        provider: 'azurerm'
-        command: 'plan'
-        workingDirectory: '$(System.DefaultWorkingDirectory)/Workspace/Env_Dev'
-        environmentServiceNameAzureRM: 'ADO'
+    
+    - download: current
+      artifact: terraform_plan
 
     - task: TerraformTask@5
       inputs:
@@ -134,3 +139,4 @@ stages:
         command: 'apply'
         workingDirectory: '$(System.DefaultWorkingDirectory)/Workspace/Env_Dev'
         environmentSer viceNameAzureRM: 'ADO'
+        commandOptions: 'tfplan'
