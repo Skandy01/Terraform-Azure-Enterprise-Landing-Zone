@@ -12,7 +12,11 @@ pool: 'Self_Hosted_Pool'
 variables: 
   workDir: '$(System.DefaultWorkingDirectory)/Workspace/Env_Dev'
 
-
+parameters:
+  - name: runApply
+    displayName: "Do you want to Run Apply?"
+    type: boolean
+    default: false
 
 stages:
 
@@ -113,7 +117,12 @@ stages:
 
 - stage: Deployment
   dependsOn: "Terraform Apply"
-  condition: and(eq(variables['Build.SourceBranch'], 'refs/heads/main'), eq(variables['Build.Reason'], 'IndividualCI'))
+  condition: >-
+    and(
+      eq(variables['Build.SourceBranch'], 'refs/heads/main'),
+      eq(variables['Build.Reason'], 'IndividualCI'),
+      eq('${{ parameters.runApply }}', 'true')
+    )
 
   jobs:
 
