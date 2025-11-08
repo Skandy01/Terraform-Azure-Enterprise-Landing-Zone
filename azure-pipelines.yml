@@ -9,6 +9,11 @@ pr:
 
 pool: 'Self_Hosted_Pool'
 
+variables: 
+  workDir: '$(System.DefaultWorkingDirectory)/Workspace/Env_Dev'
+
+
+
 stages:
 
 - stage: Build
@@ -38,7 +43,7 @@ stages:
         provider: 'azurerm'
         command: 'init'
         backendServiceArm: 'ADO'
-        workingDirectory: '$(System.DefaultWorkingDirectory)/Workspace/Env_Dev'
+        workingDirectory: '$(workDir)'
         backendAzureRmResourceGroupName: 'RG'
         backendAzureRmStorageAccountName: 'persistentstate'
         backendAzureRmContainerName: 'infra-state'
@@ -48,7 +53,7 @@ stages:
       inputs:
         provider: 'azurerm'
         command: 'validate'
-        workingDirectory: '$(System.DefaultWorkingDirectory)/Workspace/Env_Dev'
+        workingDirectory: '$(workDir)'
 
     - task: TerraformTask@5
       inputs:
@@ -57,7 +62,7 @@ stages:
         outputTo: 'console'
         customCommand: 'fmt'
         environmentServiceNameAzureRM: 'ADO'
-        workingDirectory: '$(System.DefaultWorkingDirectory)/Workspace/Env_Dev'
+        workingDirectory: '$(workDir)'
     
     - task: TerraformTask@5
       inputs:
@@ -65,7 +70,7 @@ stages:
         command: 'plan'
         environmentServiceNameAzureRM: 'ADO'
         commandOptions: '-out=tfplan'
-        workingDirectory: '$(System.DefaultWorkingDirectory)/Workspace/Env_Dev'
+        workingDirectory: '$(workDir)'
 
     - publish: tfplan
       artifact: terraform_plan
@@ -80,7 +85,7 @@ stages:
     - task: tfsec@1
       inputs:
         version: 'v1.26.0'
-        dir: '$(System.DefaultWorkingDirectory)/Workspace/Env_Dev'
+        dir: '$(workDir)'
       
     - task: SonarQubeAnalyze@7
       inputs:
@@ -122,8 +127,7 @@ stages:
       inputs:
         provider: 'azurerm'
         command: 'init'
-        workingDirectory: '$(System.DefaultWorkingDirectory)/Workspace/Env_Dev'
-        workingDirectory: '$(System.DefaultWorkingDirectory)/Workspace/Env_Dev'
+        workingDirectory: '$(workDir)'
         backendServiceArm: 'ADO'
         backendAzureRmResourceGroupName: 'RG'
         backendAzureRmStorageAccountName: 'persistentstate'
@@ -137,6 +141,6 @@ stages:
       inputs:
         provider: 'azurerm'
         command: 'apply'
-        workingDirectory: '$(System.DefaultWorkingDirectory)/Workspace/Env_Dev'
-        environmentSer viceNameAzureRM: 'ADO'
+        workingDirectory: '$(workDir)'
+        backendServiceArm: 'ADO'
         commandOptions: 'tfplan'
