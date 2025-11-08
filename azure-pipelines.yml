@@ -1,15 +1,18 @@
-trigger: none
+trigger:
+  - feature
 
-pool: Self_Hosted_Pool
+pool: 'Self_Hosted_Pool'
 
 stages: 
 
 - stage: Build
+
   displayName: Terraform_Infra_Build
   
   jobs:
 
   - job: Terraform_Installer
+
     displayName: "Terraform Install"
 
     steps: 
@@ -17,35 +20,34 @@ stages:
       inputs:
         terraformVersion: '1.7.5'
 
-  - job: Terraform_Initialization
-    displayName: "Terraform Init-Validate"
-    steps:
-
-    - task: Cache@2
-      displayName: "Restore Terraform Plugin Cache"
-      inputs:
-        key: 'terraform | "$(Agent.OS)" | .terraform.lock.hcl'
-        restoreKeys: |
-          terraform | "$(Agent.OS)"
-        path: |
-          $(System.DefaultWorkingDirectory)/Workspace/Env_Dev/.terraform
-  
     - task: TerraformTask@5
       inputs:
         provider: 'azurerm'
         command: 'init'
+        workingDirectory: '$(System.DefaultWorkingDirectory)/Workspace/Env_Dev'
         backendServiceArm: 'ADO'
         backendAzureRmResourceGroupName: 'RG'
         backendAzureRmStorageAccountName: 'persistentstate'
         backendAzureRmContainerName: 'infra-state'
         backendAzureRmKey: 'terraform.tfstate'
 
-    - task: Cache@2
-      displayName: "Save Terraform Plugin Cache"
+  - job: Terraform_Initialization
+    dependsOn: Terraform_Installer
+
+    displayName: "Terraform Init-Validate"
+
+    steps:
+  
+    - task: TerraformTask@5
       inputs:
-        key: 'terraform | "$(Agent.OS)" | .terraform.lock.hcl'
-        path: |
-          $(System.DefaultWorkingDirectory)/Workspace/Env_Dev/.terraform
+        provider: 'azurerm'
+        command: 'init'
+        backendServiceArm: 'ADO'
+        workingDirectory: '$(System.DefaultWorkingDirectory)/Workspace/Env_Dev'
+        backendAzureRmResourceGroupName: 'RG'
+        backendAzureRmStorageAccountName: 'persistentstate'
+        backendAzureRmContainerName: 'infra-state'
+        backendAzureRmKey: 'terraform.tfstate'
     
     - task: TerraformTask@5
       inputs:
@@ -66,7 +68,7 @@ stages:
         command: 'plan'
         environmentServiceNameAzureRM: 'ADO'
         commandOptions: '-out=tfplan'
-        
+
     - publish: tfplan
       artifact: terraform_plan
 
@@ -87,9 +89,14 @@ stages:
         jdkversion: 'JAVA_HOME_17_X64'
     
 - stage: Approval_Gate
+  dependsOn: 
+  - Static_Iac_Scan
+  - Build
 
   jobs:
     - job: Manual_Validation
+      displayName: "Manual_Aprroval"
+      pool: server
       steps:
       - task: ManualValidation@1
         inputs:
@@ -98,7 +105,7 @@ stages:
           onTimeout: 'resume'
 
 - stage: Deployment
-  
+  dependsOn: Approval_Gate
   jobs:
   - job: Infra_Deployment
     steps:
@@ -106,6 +113,7 @@ stages:
       inputs:
         provider: 'azurerm'
         command: 'init'
+        workingDirectory: '$(System.DefaultWorkingDirectory)/Workspace/Env_Dev'
         workingDirectory: '$(System.DefaultWorkingDirectory)/Workspace/Env_Dev'
         backendServiceArm: 'ADO'
         backendAzureRmResourceGroupName: 'RG'
@@ -125,4 +133,4 @@ stages:
         provider: 'azurerm'
         command: 'apply'
         workingDirectory: '$(System.DefaultWorkingDirectory)/Workspace/Env_Dev'
-        environmentServiceNameAzureRM: 'ADO'
+        environmentSer viceNameAzureRM: 'ADO'
