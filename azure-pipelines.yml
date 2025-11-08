@@ -1,10 +1,11 @@
 trigger: none
 
+pool: Self_Hosted_Pool
+
 stages: 
 
 - stage: Build
   displayName: Terraform_Infra_Build
-  pool: 
   
   jobs:
 
@@ -14,11 +15,21 @@ stages:
     steps: 
     - task: TerraformInstaller@1
       inputs:
-        terraformVersion: 'latest'
+        terraformVersion: '1.7.5'
 
   - job: Terraform_Initialization
     displayName: "Terraform Init-Validate"
     steps:
+
+    - task: Cache@2
+      displayName: "Restore Terraform Plugin Cache"
+      inputs:
+        key: 'terraform | "$(Agent.OS)" | .terraform.lock.hcl'
+        restoreKeys: |
+          terraform | "$(Agent.OS)"
+        path: |
+          $(System.DefaultWorkingDirectory)/Workspace/Env_Dev/.terraform
+  
     - task: TerraformTask@5
       inputs:
         provider: 'azurerm'
@@ -28,6 +39,13 @@ stages:
         backendAzureRmStorageAccountName: 'persistentstate'
         backendAzureRmContainerName: 'infra-state'
         backendAzureRmKey: 'terraform.tfstate'
+
+    - task: Cache@2
+      displayName: "Save Terraform Plugin Cache"
+      inputs:
+        key: 'terraform | "$(Agent.OS)" | .terraform.lock.hcl'
+        path: |
+          $(System.DefaultWorkingDirectory)/Workspace/Env_Dev/.terraform
     
     - task: TerraformTask@5
       inputs:
@@ -47,6 +65,10 @@ stages:
         provider: 'azurerm'
         command: 'plan'
         environmentServiceNameAzureRM: 'ADO'
+        commandOptions: '-out=tfplan'
+        
+    - publish: tfplan
+      artifact: terraform_plan
 
 - stage: Static_Iac_Scan
   displayName: Code_Scan
@@ -60,18 +82,47 @@ stages:
         version: 'v1.26.0'
         dir: '$(System.DefaultWorkingDirectory)/Workspace/Env_Dev'
       
+    - task: SonarQubeAnalyze@7
+      inputs:
+        jdkversion: 'JAVA_HOME_17_X64'
     
-    
+- stage: Approval_Gate
 
-- stage:
+  jobs:
+    - job: Manual_Validation
+      steps:
+      - task: ManualValidation@1
+        inputs:
+          notifyUsers: 'devopscollab101@gmail.com'
+          approvers: 'devopscollab101@gmail.com'
+          onTimeout: 'resume'
+
+- stage: Deployment
   
   jobs:
-  - job:
+  - job: Infra_Deployment
+    steps:
+    - task: TerraformTask@5
+      inputs:
+        provider: 'azurerm'
+        command: 'init'
+        workingDirectory: '$(System.DefaultWorkingDirectory)/Workspace/Env_Dev'
+        backendServiceArm: 'ADO'
+        backendAzureRmResourceGroupName: 'RG'
+        backendAzureRmStorageAccountName: 'persistentstate'
+        backendAzureRmContainerName: 'infra-state'
+        backendAzureRmKey: 'terraform.tfstate'
 
-- stage:
-  jobs:
+    - task: TerraformTask@5
+      inputs:
+        provider: 'azurerm'
+        command: 'plan'
+        workingDirectory: '$(System.DefaultWorkingDirectory)/Workspace/Env_Dev'
+        environmentServiceNameAzureRM: 'ADO'
 
-  - job:
-
-  - job:
-
+    - task: TerraformTask@5
+      inputs:
+        provider: 'azurerm'
+        command: 'apply'
+        workingDirectory: '$(System.DefaultWorkingDirectory)/Workspace/Env_Dev'
+        environmentServiceNameAzureRM: 'ADO'
