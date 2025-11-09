@@ -148,31 +148,10 @@ stages:
       displayName: "Run TruffleHog"
       continueOnError: true
 
-- stage: Approval_Gate
-  displayName: "Manual Approval"
-  dependsOn: 
-  - Build
-  condition: and(eq(variables['Build.SourceBranch'], 'refs/heads/main'), eq(variables['Build.Reason'], 'IndividualCI'))
-
-  jobs:
-    - job: Manual_Validation
-      displayName: "Manual_Aprroval"
-      timeoutInMinutes: 4320
-
-      pool: server
-
-      steps:
-      - task: ManualValidation@1
-        displayName: "Manual Validation"
-        inputs:
-          notifyUsers: 'devopscollab101@gmail.com'
-          approvers: 'devopscollab101@gmail.com'
-          instructions: 'Please review the Terraform plan and approve deployment to Dev environment.'
-          onTimeout: 'reject'
-
 - stage: Deployment
   displayName: "Infra_Deployment"
-  dependsOn: Approval_Gate
+  dependsOn: Build
+
   condition: >-
     and(
       eq(variables['Build.SourceBranch'], 'refs/heads/main'),
@@ -182,8 +161,25 @@ stages:
 
   jobs:
 
+  - job: Manual_Validation
+    displayName: "Manual_Aprroval"
+    timeoutInMinutes: 4320
+
+    pool: server
+
+    steps:
+    - task: ManualValidation@1
+      displayName: "Manual Validation"
+      inputs:
+        notifyUsers: 'devopscollab101@gmail.com'
+        approvers: 'devopscollab101@gmail.com'
+        instructions: 'Please review the Terraform plan and approve deployment to Dev environment.'
+        onTimeout: 'reject'
+
   - job: Infra_Deployment
     displayName: "Apply Terraform Changes"
+    dependsOn: Manual_Validation
+
     steps:
     - task: TerraformInstaller@1
       displayName: "Terraform Installer"
