@@ -32,6 +32,7 @@ stages:
 
     steps: 
     - task: TerraformInstaller@1
+      displayName: "Terraform Installer"
       inputs:
         terraformVersion: '1.7.5'
 
@@ -41,8 +42,13 @@ stages:
     displayName: "Terraform Init, Validate, Plan"
 
     steps:
-  
+    - task: TerraformInstaller@1
+      displayName: "Terraform Installer"
+      inputs:
+        terraformVersion: '1.7.5'
+
     - task: TerraformTask@5
+      displayName: "Terraform Init"
       inputs:
         provider: 'azurerm'
         command: 'init'
@@ -54,12 +60,14 @@ stages:
         backendAzureRmKey: 'terraform.tfstate'
     
     - task: TerraformTask@5
+      displayName: "Terraform Validate"
       inputs:
         provider: 'azurerm'
         command: 'validate'
         workingDirectory: '$(workDir)'
 
     - task: TerraformTask@5
+      displayName: "Terraform fmt"
       inputs:
         provider: 'azurerm'
         command: 'custom'
@@ -69,6 +77,7 @@ stages:
         workingDirectory: '$(workDir)'
     
     - task: TerraformTask@5
+      displayName: "Terraform Plan"
       inputs:
         provider: 'azurerm'
         command: 'plan'
@@ -140,6 +149,7 @@ stages:
       continueOnError: true
 
 - stage: Approval_Gate
+  displayName: "Manual Approval"
   dependsOn: 
   - Build
   condition: and(eq(variables['Build.SourceBranch'], 'refs/heads/main'), eq(variables['Build.Reason'], 'IndividualCI'))
@@ -153,6 +163,7 @@ stages:
 
       steps:
       - task: ManualValidation@1
+        displayName: "Manual Validation"
         inputs:
           notifyUsers: 'devopscollab101@gmail.com'
           approvers: 'devopscollab101@gmail.com'
@@ -175,9 +186,11 @@ stages:
     displayName: "Apply Terraform Changes"
     steps:
     - task: TerraformInstaller@1
+      displayName: "Terraform Installer"
       inputs:
         terraformVersion: '1.7.5'
     - task: TerraformTask@5
+      displayName: "Terraform Init"
       inputs:
         provider: 'azurerm'
         command: 'init'
@@ -193,6 +206,7 @@ stages:
       patterns: '**/tfplan'
 
     - task: TerraformTask@5
+      displayName: "Terraform Apply"
       inputs:
         provider: 'azurerm'
         command: 'apply'
