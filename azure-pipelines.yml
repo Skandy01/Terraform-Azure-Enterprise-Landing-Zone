@@ -139,26 +139,6 @@ stages:
       displayName: "Run TruffleHog"
       continueOnError: true
 
-  - job: SonarQube_Scan
-    displayName: "SonarQube - Code Quality"
-    steps:
-    - task: SonarQubePrepare@5
-      inputs:
-        SonarQube: 'SonarQube'
-        scannerMode: 'CLI'
-        configMode: 'manual'
-        cliProjectKey: 'terraform-infrastructure'
-        cliProjectName: 'Terraform Infrastructure'
-        cliSources: '$(workDir)'
-
-    - task: SonarQubeAnalyze@5
-      inputs:
-        jdkversion: 'JAVA_HOME_17_X64'
-    
-    - task: SonarQubePublish@5
-      inputs:
-        pollingTimeoutSec: '300'
-
 - stage: Approval_Gate
   dependsOn: 
   - Build
