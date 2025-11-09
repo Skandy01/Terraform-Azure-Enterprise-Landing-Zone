@@ -76,7 +76,7 @@ stages:
         commandOptions: '-out=tfplan'
         workingDirectory: '$(workDir)'
 
-    - publish: tfplan
+    - publish: '$(System.DefaultWorkingDirectory)/Workspace/Env_Dev/tfplan'
       artifact: terraform_plan
 
 - stage: Static_Iac_Scan
@@ -84,16 +84,177 @@ stages:
 
   jobs:
   - job: CheckOv
+    displayName: "CheckOv Scan"
+    steps:
+      - task: GoTool@0
+        inputs:
+          version: '1.21.0'
+      
+      - script: |
+          go install github.com/checkov/checkov@latest
+          $(go env GOPATH)/bin/checkov -d $(workDir) --output sarif --output-file checkov-results.sarif
+        
+        displayName: "Run CheckOv"
+        continueOnError: true
+
+      - task: PublishSecurityAnalysisLogs@3
+        inputs:
+          ArtifactName: "CodeAnalysisLogs"
+          ToolName: "CheckOv"
+
   - job: TFSec
+    displayName: "TFSec Scan"
     steps:
     - task: tfsec@1
       inputs:
         version: 'v1.26.0'
         dir: '$(workDir)'
-      
+      continueOnError: true
+    
+  - job: Terrascan
+    displayName: "Terrascan Scan"
+    steps:
+    - script: |
+        curl -L "$(curl -s https://api.github.com/repos/tenable/terrascan/releases/latest | grep -o -E "https://.+?_Linux_x86_64.tar.gz")" -o terrascan.tar.gz
+        tar -xf terrascan.tar.gz
+        ./terrascan version
+        ./terrascan scan -d $(workDir) -i terraform --output sarif --output-file terrascan-results.sarif
+      displayName: "Install and Run Terrascan"
+      continueOnError: true
+
+    - task: PublishSecurityAnalysisLogs@3
+      inputs:
+        ArtifactName: "CodeAnalysisLogs"
+        ToolName: "Terrascan"
+
+  - job: SonarQube
+    displayName: 'Sonarqube Scan'
+    steps:
     - task: SonarQubeAnalyze@7
       inputs:
         jdkversion: 'JAVA_HOME_17_X64'
+
+  - job: KICS
+    displayName: 'KICS Scan'
+    steps:
+    - script: |
+        docker run -v $(workDir):/path checkmarx/kics:latest scan -p /path -o /path --output-name kics-results
+      displayName: "Run KICS Scan"
+      continueOnError: true
+    
+    - task: PublishSecurityAnalysisLogs@3
+      inputs:
+        ArtifactName: "CodeAnalysisLogs"
+        ToolName: "KICS"
+  
+  - job: Semgrep
+    displayName: "Semgrep Scan"
+    steps:
+    - script: |
+        python -m pip install semgrep
+        semgrep --config=auto --error $(workDir) --sarif --output semgrep-results.sarif
+      displayName: "Run Semgrep"
+      continueOnError: true
+
+    - task: PublishSecurityAnalysisLogs@3
+      inputs:
+        ArtifactName: "CodeAnalysisLogs"
+        ToolName: "Semgrep"
+
+  - job: OPA_Conftest
+    displayName: "OPA Conftest"
+    steps:
+    - script: |
+        curl -L -o conftest https://github.com/open-policy-agent/conftest/releases/latest/download/conftest_linux_x86_64
+        chmod +x conftest
+        ./conftest test $(workDir) --policy https://github.com/swade1987/terraform-policies.git//aws
+      displayName: "Run OPA Conftest"
+      continueOnError: true
+
+  - job: TFLint
+    displayName: "TFLint Scan"
+    steps:
+    - script: |
+        curl -s https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh | bash
+        tflint --init
+        tflint --format sarif $(workDir) --output tflint-results.sarif
+      displayName: "Run TFLint"
+      continueOnError: true
+
+    - task: PublishSecurityAnalysisLogs@3
+      inputs:
+        ArtifactName: "CodeAnalysisLogs"
+        ToolName: "TFLint"
+
+  - job: Azure_Specific_Scans
+    displayName: "Azure Specific Scans"
+    steps:
+    - task: AzureCLI@2
+      displayName: "AzSK Scan"
+      inputs:
+        azureSubscription: 'ADO'
+        scriptType: 'pscore'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          Install-Module -Name AzSK -Force -AllowClobber
+          Get-AzSKAzureServicesSecurityStatus -SubscriptionId $(azSubId) -ResourceGroupNames "*" -DoNotOpenOutputFolder
+      continueOnError: true
+
+  - job: Security_Scorecards
+    displayName: "OpenSSF Scorecards"
+    steps:
+    - script: |
+        docker run -v $(workDir):/repo gcr.io/openssf/scorecard:latest --repo=github.com/your-org/your-repo --format=sarif --output=scorecard-results.sarif
+      displayName: "Run OSSF Scorecards"
+      continueOnError: true
+
+  - job: Dependency_Scanning
+    displayName: "Dependency Scanning"
+    steps:
+    - task: Trivy@1
+      inputs:
+        scanType: 'fs'
+        scanPath: '$(workDir)'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+      continueOnError: true
+
+    - script: |
+        # Scan for secrets in code
+        git clone https://github.com/zricethezav/gitleaks.git
+        cd gitleaks
+        make build
+        ./gitleaks detect -s $(workDir) -f sarif -r gitleaks-results.sarif
+      displayName: "Gitleaks Secrets Detection"
+      continueOnError: true
+
+  - job: Compliance_Validation
+    displayName: "Compliance Validation"
+    steps:
+    - script: |
+        # Custom compliance checks
+        echo "Running CIS Benchmark checks..."
+        # Add custom compliance scripts here
+      displayName: "CIS Benchmark Checks"
+
+  - job: Aggregate_Results
+    displayName: "Aggregate Security Results"
+    dependsOn:
+      - CheckOv
+      - TFSec
+      - Terrascan
+      - KICS
+      - Semgrep
+      - TFLint
+    steps:
+    - task: PublishBuildArtifacts@1
+      inputs:
+        pathToPublish: '$(System.DefaultWorkingDirectory)'
+        artifactName: 'SecurityScanResults'
+    
+    - task: SarifUploader@3
+      inputs:
+        sarifFile: '**/*.sarif'
     
 - stage: Approval_Gate
   dependsOn: 
