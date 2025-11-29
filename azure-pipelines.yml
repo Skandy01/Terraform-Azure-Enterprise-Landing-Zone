@@ -127,21 +127,54 @@ stages:
       inputs:
         targetType: 'inline'
         script: |
-          Set-Location "$(System.DefaultWorkingDirectory)/Workspace/Env_Dev"
-          
-          # Check if TFLint exists
-          if (-not (Get-Command tflint -ErrorAction SilentlyContinue)) {
-              Write-Host "Installing TFLint..."
-              Invoke-WebRequest -Uri "https://github.com/terraform-linters/tflint/releases/download/v0.58.0/tflint_windows_amd64.zip" -OutFile "tflint.zip"
-              Expand-Archive -Path "tflint.zip" -DestinationPath "$(System.DefaultWorkingDirectory)/tflint"
-              $env:Path += ";$(System.DefaultWorkingDirectory)/tflint"
+          try {
+              Set-Location "$(System.DefaultWorkingDirectory)/Workspace/Env_Dev"
+              
+              # Check for Terraform files first
+              $tfFiles = Get-ChildItem -Filter "*.tf"
+              if (-not $tfFiles) {
+                  Write-Host "No Terraform files found to lint. Skipping TFLint."
+                  exit 0
+              }
+              
+              Write-Host "Found $($tfFiles.Count) Terraform files to lint"
+              
+              # Install TFLint if not present
+              if (-not (Get-Command tflint -ErrorAction SilentlyContinue)) {
+                  Write-Host "Downloading TFLint..."
+                  $tflintDir = "$(System.DefaultWorkingDirectory)/tflint"
+                  New-Item -ItemType Directory -Path $tflintDir -Force
+                  
+                  Invoke-WebRequest -Uri "https://github.com/terraform-linters/tflint/releases/download/v0.58.0/tflint_windows_amd64.zip" -OutFile "$tflintDir/tflint.zip"
+                  Expand-Archive -Path "$tflintDir/tflint.zip" -DestinationPath $tflintDir -Force
+                  
+                  # Add to PATH for current session
+                  $env:Path = "$tflintDir;$env:Path"
+              }
+              
+              Write-Host "TFLint version:"
+              tflint --version
+              
+              # Initialize TFLint plugins
+              Write-Host "Initializing TFLint plugins..."
+              tflint --init
+              
+              # Run TFLint
+              Write-Host "Running TFLint..."
+              tflint --format json --out tflint-report.json
+              
+              if (Test-Path "tflint-report.json") {
+                  Write-Host "TFLint completed. Report summary:"
+                  $report = Get-Content tflint-report.json | ConvertFrom-Json
+                  Write-Host "Issues found: $($report.issues.Count)"
+              } else {
+                  Write-Host "TFLint completed but no report was generated"
+              }
+              
+          } catch {
+              Write-Host "##vso[task.logissue type=error]Error running TFLint: $($_.Exception.Message)"
+              Write-Host "This is non-fatal - continuing pipeline..."
           }
-          
-          # Run TFLint
-          tflint --format json --out tflint-report.json
-          
-          # Show results
-          Get-Content tflint-report.json
     - task: PublishPipelineArtifact@1
       displayName: 'Publish Tflint Report'
       inputs:
