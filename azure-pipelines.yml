@@ -1,10 +1,15 @@
-trigger: none
+trigger:
+  branches:
+    include:
+      - main
+      - feature/*
+      - develop/*
 
 stages: 
 
 - stage: Build
   displayName: Terraform_Infra_Build
-  pool: 
+  pool: Terraform-Infra-Agent-Pool
   
   jobs:
 
@@ -17,8 +22,15 @@ stages:
         terraformVersion: 'latest'
 
   - job: Terraform_Initialization
-    displayName: "Terraform Init-Validate"
-    steps:
+    displayName: "Terraform Init-Validate-Plan"
+
+    steps: 
+
+    # - task: TerraformInstaller@1
+    #   inputs:
+    #     terraformVersion: 'latest'
+
+    
     
 
 
