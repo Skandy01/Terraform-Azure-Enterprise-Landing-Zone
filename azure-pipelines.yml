@@ -72,7 +72,7 @@ stages:
         workingDirectory: '$(workingDir)'
         outputTo: 'console'
         customCommand: 'terraform fmt'
-        environmentServiceNameAzureRM: '$(wif)'
+        
 
     - task: TerraformTask@5
       displayName: Terraform validate
