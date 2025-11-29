@@ -64,15 +64,16 @@ stages:
         backendAzureRmContainerName: 'PipelineCont'
         backendAzureRmKey: 'dev.terraform.tfstate'
   
+
     - task: TerraformTask@5
+      displayName: 'Terraform fmt'
       inputs:
         provider: 'azurerm'
         command: 'custom'
-        workingDirectory: '$(System.DefaultWorkingDirectory)/Workspace/Infra_Dev'
+        workingDirectory: '$(workDir)'
         outputTo: 'console'
-        customCommand: 'terraform fmt'
-        environmentServiceNameAzureRM: 'Workload_Identity_Federation'
-        check: true
+        customCommand: 'fmt'
+        environmentServiceNameAzureRM: '$(wif)'    
         
 
     - task: TerraformTask@5
