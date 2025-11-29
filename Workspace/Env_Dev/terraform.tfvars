@@ -23,7 +23,7 @@ stgs = {
 
   STG1 = {
 
-    name                          = "stg1"
+    name                          = "vishystg1"
     location                      = "East US"
     rg_name                       = "resource-group-1"
     account_tier                  = "Standard"
@@ -44,7 +44,7 @@ stgs = {
   }
 
   STG2 = {
-    name                          = "stg2"
+    name                          = "vishystg2"
     location                      = "East US"
     rg_name                       = "resource-group-2"
     account_tier                  = "Standard"
@@ -71,7 +71,7 @@ vnets = {
     name                           = "vnet1"
     location                       = "East US"
     rg_name                        = "resource-group-1"
-    address_space                  = ["10.0.0.0"]
+    address_space                  = ["10.0.0.0/16"]
     flow_timeout_in_minutes        = 10
     private_endpoint_vnet_policies = "Basic"
     owner                          = "vishy"
@@ -84,7 +84,7 @@ vnets = {
     name                           = "vnet2"
     location                       = "East US"
     rg_name                        = "resource-group-2"
-    address_space                  = ["10.0.0.1"]
+    address_space                  = ["10.1.0.0/16"]
     flow_timeout_in_minutes        = 7
     edge_zone                      = null
     private_endpoint_vnet_policies = "Basic"
@@ -97,7 +97,7 @@ subnets = {
 
   subnet1 = {
 
-    subnet_name                                   = "subnet1"
+    subnet_name                                   = "frontendsubnet"
     virtual_network_name                          = "vnet1"
     resource_group_name                           = "resource-group-1"
     address_prefixes                              = ["10.0.0.0/24"]
@@ -113,7 +113,7 @@ subnets = {
     subnet_name                                   = "AzureBastionSubnet"
     virtual_network_name                          = "vnet1"
     resource_group_name                           = "resource-group-1"
-    address_prefixes                              = ["10.0.1.0/24"]
+    address_prefixes                              = ["10.0.2.0/24"]
     default_outbound_access_enabled               = true
     private_endpoint_network_policies             = "NetworkSecurityGroupEnabled"
     private_link_service_network_policies_enabled = true
@@ -123,10 +123,10 @@ subnets = {
 
   subnet2 = {
 
-    subnet_name                                   = "subnet2"
-    virtual_network_name                          = "vnet2"
+    subnet_name                                   = "backendsubnet"
+    virtual_network_name                          = "vnet1"
     resource_group_name                           = "resource-group-2"
-    address_prefixes                              = ["10.0.0.0/24"]
+    address_prefixes                              = ["10.0.1.0/24"]
     default_outbound_access_enabled               = true
     private_link_service_network_policies_enabled = true
 
