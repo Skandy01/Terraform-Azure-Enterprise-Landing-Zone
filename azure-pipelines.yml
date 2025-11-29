@@ -5,6 +5,25 @@ trigger:
       - feature/*
       - develop/*
 
+pool: Terraform-Infra-Agent-Pool
+
+parameters:
+- name: runApply
+  displayName: 'Terraform apply chalana hai?'
+  type: boolean
+  default: false
+
+- name: runScanning
+  displayName: 'Code ki Scanning krwani hai?'  
+  type: boolean
+  default: false
+
+
+variables:
+  workingDir: '$(System.DefaultWorkingDirectory)/Workspace/Env_Dev'
+  wif: 'Workload_Identity_Federation'
+
+
 stages: 
 
 - stage: Build
@@ -18,6 +37,7 @@ stages:
 
     steps: 
     - task: TerraformInstaller@1
+      displayName: Terraform Install
       inputs:
         terraformVersion: 'latest'
 
@@ -25,30 +45,274 @@ stages:
     displayName: "Terraform Init-Validate-Plan"
 
     steps: 
+    - task: TerraformInstaller@1
+      displayName: Terraform Install
+      inputs:
+        terraformVersion: 'latest'
 
-    # - task: TerraformInstaller@1
-    #   inputs:
-    #     terraformVersion: 'latest'
+    - task: TerraformTask@5
+      displayName: Terraform init
+      inputs:
 
+        provider: 'azurerm'
+        command: 'init'
+        workingDirectory: '$(workingDir)'
+        backendServiceArm: '$(wif)'
+        backendAzureRmOverrideSubscriptionID: '22135bdc-d3fd-4095-9a18-2094dab79b13'
+        backendAzureRmResourceGroupName: 'rg_piepline'
+        backendAzureRmStorageAccountName: 'stgpipeline'
+        backendAzureRmContainerName: 'PipelineCont'
+        backendAzureRmKey: 'dev.terraform.tfstate'
+  
+    - task: TerraformTask@5
+      displayName: Terraform fmt
+      inputs:
+        provider: 'azurerm'
+        command: 'custom'
+        workingDirectory: '$(workingDir)'
+        outputTo: 'console'
+        customCommand: 'terraform fmt'
+        environmentServiceNameAzureRM: '$(wif)'
+
+    - task: TerraformTask@5
+      displayName: Terraform validate
+      inputs:
+        provider: 'azurerm'
+        command: 'validate'
+        workingDirectory: '$(workingDir)'
+
+    - task: TerraformTask@5
+      displayName: Terraform Plan
+      inputs:
+        provider: 'azurerm'
+        command: 'plan'
+        workingDirectory: '$(workingDir)'
+        environmentServiceNameAzureRM: '$(wif)'
+        commandOptions: '-out=tfplan'
+
+    - task: PublishPipelineArtifact@1
+      displayName: 'Publish Terraform Plan as Artifact'
+      inputs:
+        targetPath: '$(workingDir)'
+        artifact: 'TerraformPlan'
+        publishLocation: 'pipeline'
+        
+    - task: TerraformTask@5
+      displayName: Terraform Show
+      inputs:
+        provider: 'azurerm'
+        command: 'show'
+        workingDirectory: '$(workingDir)'
+        outputTo: 'console'
+        outputFormat: 'default'
+        environmentServiceNameAzureRM: '$(wif)'
     
-    
 
+- stage: Terraform_Scanning
 
-
-- stage:
-
-  jobs:
-  - job:
-
-- stage:
+  displayName: Scanning_Code
+  dependsOn: Build
+  pool: Terraform-Infra-Agent-Pool
+  condition: and(succeeded(), eq('${{ parameters.runScanning }}', true))
   
   jobs:
-  - job:
+  - job: Scanning_Terraform_Code
+    displayName: Terraform Code Scanning Tools
 
-- stage:
+    steps:
+    - task: PowerShell@2
+      displayName: Run Tflint
+      inputs:
+        targetType: 'inline'
+        script: |
+          Set-Location "$(System.DefaultWorkingDirectory)/Workspace/Env_Dev"
+          
+          # Check if TFLint exists
+          if (-not (Get-Command tflint -ErrorAction SilentlyContinue)) {
+              Write-Host "Installing TFLint..."
+              Invoke-WebRequest -Uri "https://github.com/terraform-linters/tflint/releases/download/v0.58.0/tflint_windows_amd64.zip" -OutFile "tflint.zip"
+              Expand-Archive -Path "tflint.zip" -DestinationPath "$(System.DefaultWorkingDirectory)/tflint"
+              $env:Path += ";$(System.DefaultWorkingDirectory)/tflint"
+          }
+          
+          # Run TFLint
+          tflint --format json --out tflint-report.json
+          
+          # Show results
+          Get-Content tflint-report.json
+    - task: PublishPipelineArtifact@1
+      displayName: 'Publish Tflint Report'
+      inputs:
+        targetPath: '$(System.DefaultWorkingDirectory)/Workspace/Env_Dev'
+        artifact: 'TflintReport'
+        publishLocation: 'pipeline'
+      condition: succeededOrFailed()
+    - task: tfsec@1
+      displayName: Run Tfsec
+      inputs:
+        version: 'v1.26.0'
+        debug: true
+        publishTestResults: true   
+        dir: '$(workingDir)'
+    - task: PublishPipelineArtifact@1
+      displayName: 'Publish Tfsec Report'
+      inputs:
+        targetPath: '$(workingDir)'
+        artifact: 'TfsecReport'
+        publishLocation: 'pipeline'
+      condition: succeededOrFailed()
+    - task: PowerShell@2
+      displayName: Run Terrascan
+      inputs:
+        targetType: 'inline'
+        script: |
+          # Navigate to Terraform directory
+          Set-Location "$(System.DefaultWorkingDirectory)/Workspace/Env_Dev"
+          
+          # Check if Terrascan exists
+          if (-not (Get-Command terrascan -ErrorAction SilentlyContinue)) {
+              Write-Host "Installing Terrascan..."
+              Invoke-WebRequest -Uri "https://github.com/accurics/terrascan/releases/download/v1.15.1/terrascan_windows_amd64.zip" -OutFile "terrascan.zip"
+              Expand-Archive -Path "terrascan.zip" -DestinationPath "$(System.DefaultWorkingDirectory)/terrascan"
+              $env:Path += ";$(System.DefaultWorkingDirectory)/terrascan"
+          }
+          
+          # Run Terrascan scan
+          terrascan scan -d . -o json > terrascan-report.json
+          
+          # Show results
+          Get-Content terrascan-report.json
+    - task: PublishPipelineArtifact@1
+      displayName: 'Publish Terrascan Report'
+      inputs:
+        targetPath: '$(System.DefaultWorkingDirectory)/Workspace/Env_Dev'
+        artifact: 'TerrascanReport'
+        publishLocation: 'pipeline'
+      condition: succeededOrFailed()
+    - task: PowerShell@2
+      displayName: Run Checkov
+      inputs:
+        targetType: 'inline'
+        script: |
+          # Navigate to Terraform directory
+          Set-Location "$(System.DefaultWorkingDirectory)/Workspace/Env_Dev"
+          
+          # Install Checkov if not installed
+          if (-not (Get-Command checkov -ErrorAction SilentlyContinue)) {
+              Write-Host "Installing Checkov..."
+              python -m pip install --upgrade pip
+              python -m pip install checkov
+          }
+          
+          # Run Checkov
+          checkov -d . -o json > checkov-report.json
+          
+          # Show results
+          Get-Content checkov-report.json
+    - task: PublishPipelineArtifact@1
+      displayName: 'Publish Checkov Report'
+      inputs:
+        targetPath: '$(System.DefaultWorkingDirectory)/Workspace/Env_Dev'
+        artifact: 'CheckovReport'
+        publishLocation: 'pipeline'
+      condition: succeededOrFailed()
+    - task: PowerShell@2
+      displayName: Run KICS
+      inputs:
+        targetType: 'inline'
+        script: |
+          Set-Location "$(workingDir)"
+
+          if (-not (Get-Command kics -ErrorAction SilentlyContinue)) {
+              Write-Host "Installing KICS..."
+              Invoke-WebRequest -Uri "https://github.com/Checkmarx/kics/releases/download/v1.8.0/kics_1.8.0_windows_amd64.zip" -OutFile "kics.zip"
+              Expand-Archive -Path "kics.zip" -DestinationPath "$(System.DefaultWorkingDirectory)/kics"
+              $env:Path += ";$(System.DefaultWorkingDirectory)/kics"
+          }
+
+          kics scan -p . -o json -r kics-report.json
+          Get-Content kics-report.json
+    - task: PublishPipelineArtifact@1
+      displayName: 'Publish KICS Report'
+      inputs:
+        targetPath: '$(workingDir)'
+        artifact: 'KICSReport'
+        publishLocation: 'pipeline'
+      condition: succeededOrFailed()
+    
+
+- stage: Manual_Approval
+
+  displayName: Manual_Approval
+  dependsOn: Build
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'), eq('${{ parameters.runScanning }}', true))
+  
   jobs:
 
-  - job:
+  - job: manual_approval
+    displayName: Manual Approval Krdo Apply ke liye
+    pool: server
 
-  - job:
+    steps:
+    - task: ManualValidation@1
+      inputs:
+        notifyUsers: 'devopscollab101@gmail.com'
+        approvers: 'devopscollab101@gmail.com'
+        instructions: Plan check karlo Bhaiya...!
+
+
+- stage: Deploy
+
+  displayName: Terraform Init & Apply 
+  dependsOn: Manual_Approval
+  condition: and(succeeded(), eq('${{ parameters.runApply }}', true))
+  pool: Terraform-Infra-Agent-Pool
+
+  jobs: 
+
+  - job: approve_before_apply
+    displayName: "Approval Before Apply"
+    pool: server
+    
+    steps:
+      - task: ManualValidation@1
+        inputs:
+          notifyUsers: 'devopscollab101@gmail.com'
+          instructions: 'Plan review ho gaya? Final apply approve karo!'
+
+  - job: Terraform_Init_to_Apply
+    displayName: Terraform Infra Deployment
+    dependsOn: approve_before_apply
+
+    steps:
+
+    - task: DownloadPipelineArtifact@2
+      displayName: 'Download Terraform Plan Artifact'
+      inputs:
+        buildType: 'current'
+        artifactName: 'TerraformPlan'
+        targetPath: '$(workingDir)'
+      condition: succeeded()
+
+    - task: TerraformTask@5
+      displayName: Terraform init
+      inputs:
+
+        provider: 'azurerm'
+        command: 'init'
+        workingDirectory: '$(workingDir)'
+        backendServiceArm: '$(wif)'
+        backendAzureRmOverrideSubscriptionID: '22135bdc-d3fd-4095-9a18-2094dab79b13'
+        backendAzureRmResourceGroupName: 'rg_piepline'
+        backendAzureRmStorageAccountName: 'stgpipeline'
+        backendAzureRmContainerName: 'PipelineCont'
+        backendAzureRmKey: 'dev.terraform.tfstate'
+
+    - task: TerraformTask@5
+      displayName: Terraform Apply
+      inputs:
+        provider: 'azurerm'
+        command: 'apply'
+        workingDirectory: '$(workingDir)'
+        environmentServiceNameAzureRM: '$(wif)'
 
