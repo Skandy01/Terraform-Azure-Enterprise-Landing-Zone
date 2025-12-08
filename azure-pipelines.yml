@@ -204,13 +204,14 @@ stages:
         script: |
           Set-Location "$(System.DefaultWorkingDirectory)/Workspace/Env_Dev"
 
-          # Install latest Terrascan (official new repo)
+          # Install latest Terrascan (official repo - tenable)
           if (-not (Get-Command terrascan -ErrorAction SilentlyContinue)) {
-              Write-Host "Downloading latest Terrascan for Windows..."
-              $latestUrl = "https://github.com/tenable/terrascan/releases/latest/download/terrascan_windows_amd64.zip"
+              Write-Host "Downloading Terrascan v1.19.9 for Windows AMD64..."
+              $downloadUrl = "https://github.com/tenable/terrascan/releases/download/v1.19.9/terrascan_1.19.9_windows_amd64.zip"
               
-              Invoke-WebRequest -Uri $latestUrl -OutFile "terrascan.zip" -UseBasicParsing
+              Invoke-WebRequest -Uri $downloadUrl -OutFile "terrascan.zip" -UseBasicParsing
               Expand-Archive -Path "terrascan.zip" -DestinationPath "." -Force
+              Remove-Item "terrascan.zip" -Force  # Clean up zip file
               
               # terrascan.exe ab current folder mein aa jayega
               $env:PATH += ";$(Get-Location)"
@@ -219,22 +220,23 @@ stages:
           Write-Host "Terrascan version:"
           terrascan version
 
-          Write-Host "Initializing Terrascan..."
+          Write-Host "Initializing Terrascan (download policies)..."
           terrascan init
 
-          Write-Host "Running Terrascan scan..."
-          terrascan scan -d . -o json -f terrascan-report.json
+          Write-Host "Running Terrascan scan on Terraform files..."
+          terrascan scan -d . -o json --output-file terrascan-report.json
 
           if (Test-Path "terrascan-report.json") {
               Write-Host "Terrascan report generated successfully!"
-              Get-Content terrascan-report.json
+              Write-Host "=== Terrascan Results Preview ==="
+              Get-Content terrascan-report.json | Select-Object -First 20  # Sirf pehle 20 lines dikhao (full report artifact mein milega)
           } else {
-              Write-Host "No report generated – probably zero violations"
+              Write-Host "No report generated – probably zero violations (good news!)"
           }
     - task: PublishPipelineArtifact@1
       displayName: 'Publish Terrascan Report'
       inputs:
-        targetPath: '$(System.DefaultWorkingDirectory)/Workspace/Env_Dev'
+        targetPath: '$(System.DefaultWorkingDirectory)/Workspace/Env_Dev/terrascan-report.json'
         artifact: 'TerrascanReport'
         publishLocation: 'pipeline'
       condition: succeededOrFailed()
