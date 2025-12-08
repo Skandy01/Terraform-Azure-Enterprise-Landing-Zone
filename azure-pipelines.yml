@@ -132,50 +132,50 @@ stages:
       inputs:
         targetType: 'inline'
         script: |
-            Set-Location "$(System.DefaultWorkingDirectory)/Workspace/Env_Dev"
+          Set-Location "$(System.DefaultWorkingDirectory)/Workspace/Env_Dev"
 
-            # Check for Terraform files first
-            $tfFiles = Get-ChildItem -Filter "*.tf"
-            if (-not $tfFiles) {
-                Write-Host "No Terraform files found to lint. Skipping TFLint."
-                exit 0
-            }
+          # Check for Terraform files first
+          $tfFiles = Get-ChildItem -Filter "*.tf"
+          if (-not $tfFiles) {
+              Write-Host "No Terraform files found to lint. Skipping TFLint."
+              exit 0
+          }
 
-            Write-Host "Found $($tfFiles.Count) Terraform files to lint"
+          Write-Host "Found $($tfFiles.Count) Terraform files to lint"
 
-            # Install TFLint if not present
-            if (-not (Get-Command tflint -ErrorAction SilentlyContinue)) {
-                Write-Host "Downloading TFLint..."
-                $tflintDir = "$(System.DefaultWorkingDirectory)/tflint"
-                New-Item -ItemType Directory -Path $tflintDir -Force
+          # Install TFLint if not present
+          if (-not (Get-Command tflint -ErrorAction SilentlyContinue)) {
+              Write-Host "Downloading TFLint..."
+              $tflintDir = "$(System.DefaultWorkingDirectory)/tflint"
+              New-Item -ItemType Directory -Path $tflintDir -Force
 
-                Invoke-WebRequest -Uri "https://github.com/terraform-linters/tflint/releases/download/v0.58.0/tflint_windows_amd64.zip" -OutFile "$tflintDir/tflint.zip"
-                Expand-Archive -Path "$tflintDir/tflint.zip" -DestinationPath $tflintDir -Force
+              Invoke-WebRequest -Uri "https://github.com/terraform-linters/tflint/releases/download/v0.58.0/tflint_windows_amd64.zip" -OutFile "$tflintDir/tflint.zip"
+              Expand-Archive -Path "$tflintDir/tflint.zip" -DestinationPath $tflintDir -Force
 
-                # Update PATH only for current task
-                $env:PATH = "$tflintDir;$env:PATH"
-            }
+              # Update PATH only for current task
+              $env:PATH = "$tflintDir;$env:PATH"
+          }
 
-            # Verify binary path
-            Write-Host "TFLint Path: $(Get-Command tflint).Source"
+          # Verify binary path
+          Write-Host "TFLint Path: $(Get-Command tflint).Source"
 
-            Write-Host "TFLint version:"
-            tflint --version
+          Write-Host "TFLint version:"
+          tflint --version
 
-            Write-Host "Initializing TFLint plugins..."
-            tflint --init
+          Write-Host "Initializing TFLint plugins..."
+          tflint --init
 
-            Write-Host "Running TFLint..."
-            tflint --format json --out tflint-report.json
+          Write-Host "Running TFLint..."
+          tflint --format json | Out-File -FilePath "tflint-report.json" -Encoding UTF8
 
-            if (Test-Path "tflint-report.json") {
-                Write-Host "TFLint completed successfully! Report generated."
-            } else {
-                Write-Host "TFLint completed but no report generated."
-            }
+          if (Test-Path "tflint-report.json") {
+              Write-Host "TFLint completed successfully! Report generated."
+          } else {
+              Write-Host "TFLint completed but no report generated."
+          }
 
-            Write-Host "##vso[task.complete result=SucceededWithIssues]"
-
+          Write-Host "##vso[task.complete result=SucceededWithIssues]"
+    
     - task: PublishPipelineArtifact@1
       displayName: 'Publish Tflint Report'
       inputs:
