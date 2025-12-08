@@ -92,13 +92,18 @@ stages:
         environmentServiceNameAzureRM: '$(wif)'
         commandOptions: '-out=tfplan'
 
+    # - task: PublishPipelineArtifact@1
+    #   displayName: 'Publish Terraform Plan as Artifact'
+    #   inputs:
+    #     targetPath: '$(workingDir)'
+    #     artifact: 'TerraformPlan'
+    #     publishLocation: 'pipeline'
     - task: PublishPipelineArtifact@1
-      displayName: 'Publish Terraform Plan as Artifact'
       inputs:
-        targetPath: '$(workingDir)'
+        targetPath: '$(Pipeline.Workspace)'
         artifact: 'TerraformPlan'
         publishLocation: 'pipeline'
-        
+
     - task: TerraformTask@5
       displayName: Terraform Show
       inputs:
