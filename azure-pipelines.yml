@@ -202,22 +202,35 @@ stages:
       inputs:
         targetType: 'inline'
         script: |
-          # Navigate to Terraform directory
           Set-Location "$(System.DefaultWorkingDirectory)/Workspace/Env_Dev"
-          
-          # Check if Terrascan exists
+
+          # Install latest Terrascan (official new repo)
           if (-not (Get-Command terrascan -ErrorAction SilentlyContinue)) {
-              Write-Host "Installing Terrascan..."
-              Invoke-WebRequest -Uri "https://github.com/accurics/terrascan/releases/download/v1.15.1/terrascan_windows_amd64.zip" -OutFile "terrascan.zip"
-              Expand-Archive -Path "terrascan.zip" -DestinationPath "$(System.DefaultWorkingDirectory)/terrascan"
-              $env:Path += ";$(System.DefaultWorkingDirectory)/terrascan"
+              Write-Host "Downloading latest Terrascan for Windows..."
+              $latestUrl = "https://github.com/tenable/terrascan/releases/latest/download/terrascan_windows_amd64.zip"
+              
+              Invoke-WebRequest -Uri $latestUrl -OutFile "terrascan.zip" -UseBasicParsing
+              Expand-Archive -Path "terrascan.zip" -DestinationPath "." -Force
+              
+              # terrascan.exe ab current folder mein aa jayega
+              $env:PATH += ";$(Get-Location)"
           }
-          
-          # Run Terrascan scan
-          terrascan scan -d . -o json > terrascan-report.json
-          
-          # Show results
-          Get-Content terrascan-report.json
+
+          Write-Host "Terrascan version:"
+          terrascan version
+
+          Write-Host "Initializing Terrascan..."
+          terrascan init
+
+          Write-Host "Running Terrascan scan..."
+          terrascan scan -d . -o json -f terrascan-report.json
+
+          if (Test-Path "terrascan-report.json") {
+              Write-Host "Terrascan report generated successfully!"
+              Get-Content terrascan-report.json
+          } else {
+              Write-Host "No report generated – probably zero violations"
+          }
     - task: PublishPipelineArtifact@1
       displayName: 'Publish Terrascan Report'
       inputs:
@@ -225,6 +238,7 @@ stages:
         artifact: 'TerrascanReport'
         publishLocation: 'pipeline'
       condition: succeededOrFailed()
+      
     - task: PowerShell@2
       displayName: Run Checkov
       inputs:
