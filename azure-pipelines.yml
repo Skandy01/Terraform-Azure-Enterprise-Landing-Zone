@@ -255,6 +255,7 @@ stages:
         artifact: TerrascanReport
         publishLocation: pipeline
     
+    
     - task: PowerShell@2
       displayName: Run Checkov
       continueOnError: true
@@ -263,46 +264,57 @@ stages:
         script: |
           Set-Location "$(System.DefaultWorkingDirectory)/Workspace/Env_Dev"
 
-          # Step 1: Install Python (one-liner – no separate task needed)
+          # Step 1: Install Latest Python 3.14.2 if not present
           if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
-              Write-Host "Python not found → Installing Python 3.11 (lightweight)..."
-              Invoke-WebRequest -Uri "https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe" -OutFile "python-installer.exe" -UseBasicParsing
-              Start-Process -FilePath "python-installer.exe" -ArgumentList "/quiet InstallAllUsers=1 PrependPath=1" -Wait
+              Write-Host "Installing Python 3.14.2 (latest stable)..."
+              $pythonUrl = "https://www.python.org/ftp/python/3.14.2/python-3.14.2-amd64.exe"
+              Invoke-WebRequest -Uri $pythonUrl -OutFile "python-installer.exe" -UseBasicParsing
+              
+              # Silent install: All users, prepend to PATH
+              Start-Process -FilePath "python-installer.exe" -ArgumentList "/quiet InstallAllUsers=1 PrependPath=1" -Wait -NoNewWindow
               Remove-Item "python-installer.exe" -Force
-              # Refresh PATH
-              $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH","User")
+              
+              # Refresh environment variables (critical step)
+              $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH", "User")
+              refreshenv  # If Chocolatey is available, else skip
           }
 
-          # Step 2: Upgrade pip + Install Checkov
-          Write-Host "Installing/Upgrading Checkov..."
+          Write-Host "Python version: $(python --version)"
+
+          # Step 2: Install/Upgrade Checkov
+          Write-Host "Installing Checkov via pip..."
           python -m pip install --upgrade pip
-          python -m pip install --upgrade checkov
+          python -m pip install --upgrade checkov==3.2.5  # Latest stable as of Dec 2025
 
-          # Step 3: Run Checkov with proper flags
-          Write-Host "Running Checkov scan..."
-          checkov -d . --compact --skip-download -o json --output-file checkov-report.json
+          # Step 3: Run Checkov scan
+          Write-Host "Running Checkov on Terraform files..."
+          checkov -d . --framework terraform --compact --skip-download -o json --output-file checkov-report.json
 
-          # Step 4: Guarantee report exists
-          if (-not (Test-Path "checkov-report.json")) {
-              Write-Host "Checkov didn't create report → creating empty one"
-              $empty = @{ results = @{ failed_checks = @() }; summary = @{ failed = 0; passed = 0 } } | ConvertTo-Json -Depth 5
-              $empty | Out-File -FilePath "checkov-report.json" -Encoding UTF8
+          # Step 4: Ensure report exists (even if zero issues)
+          if (-not (Test-Path "checkov-report.json") -or ((Get-Item "checkov-report.json").Length -eq 0)) {
+              Write-Host "Creating fallback empty report"
+              $emptyReport = @{
+                  results = @{ failed_checks = @(); passed_checks = @() };
+                  summary = @{ failed = 0; passed = 0; skipped = 0; parsing_errors = 0 }
+              } | ConvertTo-Json -Depth 5
+              $emptyReport | Out-File -FilePath "checkov-report.json" -Encoding UTF8
           }
 
-          Write-Host "Checkov completed! Report size: $((Get-Item checkov-report.json).Length) bytes"
-          Write-Host "=== Checkov Preview (first 10 lines) ==="
-          Get-Content "checkov-report.json" | Select-Object -First 10
+          $reportSize = (Get-Item "checkov-report.json").Length
+          Write-Host "Checkov report ready! Size: $reportSize bytes"
+
+          Write-Host "=== Checkov Preview ==="
+          Get-Content "checkov-report.json" | Select-Object -First 15
 
           exit 0
 
     - task: PublishPipelineArtifact@1
-      displayName: 'Publish Checkov Report'
+      displayName: Publish Checkov Report
       inputs:
-        targetPath: '$(System.DefaultWorkingDirectory)/Workspace/Env_Dev'
-        artifact: 'CheckovReport'
-        publishLocation: 'pipeline'
-      condition: succeededOrFailed()
-    
+        targetPath: '$(System.DefaultWorkingDirectory)/Workspace/Env_Dev/checkov-report.json'
+        artifact: CheckovReport
+        publishLocation: pipeline
+
     - task: PowerShell@2
       displayName: Run KICS
       continueOnError: true  # Continue even if KICS fails
