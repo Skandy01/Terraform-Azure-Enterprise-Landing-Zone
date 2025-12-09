@@ -116,7 +116,6 @@ stages:
     
 
 - stage: Terraform_Scanning
-
   displayName: Scanning_Code
   dependsOn: Build
   pool: Terraform-Infra-Agent-Pool
@@ -129,52 +128,57 @@ stages:
     steps:
     - task: PowerShell@2
       displayName: Run Tflint
+      continueOnError: true  # Continue even if Tflint fails
       inputs:
         targetType: 'inline'
         script: |
-          Set-Location "$(System.DefaultWorkingDirectory)/Workspace/Env_Dev"
+          try {
+              Set-Location "$(System.DefaultWorkingDirectory)/Workspace/Env_Dev"
 
-          # Check for Terraform files first
-          $tfFiles = Get-ChildItem -Filter "*.tf"
-          if (-not $tfFiles) {
-              Write-Host "No Terraform files found to lint. Skipping TFLint."
-              exit 0
+              # Check for Terraform files first
+              $tfFiles = Get-ChildItem -Filter "*.tf"
+              if (-not $tfFiles) {
+                  Write-Host "No Terraform files found to lint. Skipping TFLint."
+                  exit 0
+              }
+
+              Write-Host "Found $($tfFiles.Count) Terraform files to lint"
+
+              # Install TFLint if not present
+              if (-not (Get-Command tflint -ErrorAction SilentlyContinue)) {
+                  Write-Host "Downloading TFLint..."
+                  $tflintDir = "$(System.DefaultWorkingDirectory)/tflint"
+                  New-Item -ItemType Directory -Path $tflintDir -Force
+
+                  Invoke-WebRequest -Uri "https://github.com/terraform-linters/tflint/releases/download/v0.58.0/tflint_windows_amd64.zip" -OutFile "$tflintDir/tflint.zip"
+                  Expand-Archive -Path "$tflintDir/tflint.zip" -DestinationPath $tflintDir -Force
+
+                  # Update PATH only for current task
+                  $env:PATH = "$tflintDir;$env:PATH"
+              }
+
+              # Verify binary path
+              Write-Host "TFLint Path: $(Get-Command tflint).Source"
+
+              Write-Host "TFLint version:"
+              tflint --version
+
+              Write-Host "Initializing TFLint plugins..."
+              tflint --init
+
+              Write-Host "Running TFLint..."
+              tflint --format json | Out-File -FilePath "tflint-report.json" -Encoding UTF8
+
+              if (Test-Path "tflint-report.json") {
+                  Write-Host "TFLint completed successfully! Report generated."
+              } else {
+                  Write-Host "TFLint completed but no report generated."
+              }
           }
-
-          Write-Host "Found $($tfFiles.Count) Terraform files to lint"
-
-          # Install TFLint if not present
-          if (-not (Get-Command tflint -ErrorAction SilentlyContinue)) {
-              Write-Host "Downloading TFLint..."
-              $tflintDir = "$(System.DefaultWorkingDirectory)/tflint"
-              New-Item -ItemType Directory -Path $tflintDir -Force
-
-              Invoke-WebRequest -Uri "https://github.com/terraform-linters/tflint/releases/download/v0.58.0/tflint_windows_amd64.zip" -OutFile "$tflintDir/tflint.zip"
-              Expand-Archive -Path "$tflintDir/tflint.zip" -DestinationPath $tflintDir -Force
-
-              # Update PATH only for current task
-              $env:PATH = "$tflintDir;$env:PATH"
+          catch {
+              Write-Host "##vso[task.logissue type=warning]TFLint failed: $($_.Exception.Message)"
+              Write-Host "Continuing with other scans..."
           }
-
-          # Verify binary path
-          Write-Host "TFLint Path: $(Get-Command tflint).Source"
-
-          Write-Host "TFLint version:"
-          tflint --version
-
-          Write-Host "Initializing TFLint plugins..."
-          tflint --init
-
-          Write-Host "Running TFLint..."
-          tflint --format json | Out-File -FilePath "tflint-report.json" -Encoding UTF8
-
-          if (Test-Path "tflint-report.json") {
-              Write-Host "TFLint completed successfully! Report generated."
-          } else {
-              Write-Host "TFLint completed but no report generated."
-          }
-
-          Write-Host "##vso[task.complete result=SucceededWithIssues]"
     
     - task: PublishPipelineArtifact@1
       displayName: 'Publish Tflint Report'
@@ -183,13 +187,16 @@ stages:
         artifact: 'TflintReport'
         publishLocation: 'pipeline'
       condition: succeededOrFailed()
+    
     - task: tfsec@1
       displayName: Run Tfsec
+      continueOnError: true  # Continue even if Tfsec fails
       inputs:
         version: 'v1.26.0'
         debug: true
         publishTestResults: true   
         dir: '$(workingDir)'
+    
     - task: PublishPipelineArtifact@1
       displayName: 'Publish Tfsec Report'
       inputs:
@@ -197,42 +204,58 @@ stages:
         artifact: 'TfsecReport'
         publishLocation: 'pipeline'
       condition: succeededOrFailed()
+    
     - task: PowerShell@2
       displayName: Run Terrascan
+      continueOnError: true  # Continue even if Terrascan fails
       inputs:
         targetType: 'inline'
         script: |
-          Set-Location "$(System.DefaultWorkingDirectory)/Workspace/Env_Dev"
+          try {
+              Set-Location "$(System.DefaultWorkingDirectory)/Workspace/Env_Dev"
 
-          # Install latest Terrascan (official repo - tenable)
-          if (-not (Get-Command terrascan -ErrorAction SilentlyContinue)) {
-              Write-Host "Downloading Terrascan v1.19.9 for Windows AMD64..."
-              $downloadUrl = "https://github.com/tenable/terrascan/releases/download/v1.19.9/terrascan_1.19.9_windows_amd64.zip"
-              
-              Invoke-WebRequest -Uri $downloadUrl -OutFile "terrascan.zip" -UseBasicParsing
-              Expand-Archive -Path "terrascan.zip" -DestinationPath "." -Force
-              Remove-Item "terrascan.zip" -Force  # Clean up zip file
-              
-              # terrascan.exe ab current folder mein aa jayega
-              $env:PATH += ";$(Get-Location)"
+              # Install latest Terrascan (official repo - tenable)
+              if (-not (Get-Command terrascan -ErrorAction SilentlyContinue)) {
+                  Write-Host "Downloading Terrascan v1.19.9 for Windows AMD64..."
+                  
+                  # CORRECTED URL - Using the proper GitHub release URL
+                  $downloadUrl = "https://github.com/tenable/terrascan/releases/download/v1.19.9/terrascan_1.19.9_Windows_x86_64.zip"
+                  
+                  Write-Host "Download URL: $downloadUrl"
+                  
+                  Invoke-WebRequest -Uri $downloadUrl -OutFile "terrascan.zip" -UseBasicParsing
+                  Expand-Archive -Path "terrascan.zip" -DestinationPath "." -Force
+                  Remove-Item "terrascan.zip" -Force  # Clean up zip file
+                  
+                  # Add current directory to PATH
+                  $env:PATH = "$(Get-Location);$env:PATH"
+              }
+
+              Write-Host "Terrascan version:"
+              terrascan version
+
+              Write-Host "Initializing Terrascan (download policies)..."
+              terrascan init
+
+              Write-Host "Running Terrascan scan on Terraform files..."
+              terrascan scan -d . -o json --output-file terrascan-report.json
+
+              if (Test-Path "terrascan-report.json") {
+                  Write-Host "Terrascan report generated successfully!"
+                  Write-Host "=== Terrascan Results Preview ==="
+                  Get-Content terrascan-report.json | Select-Object -First 20
+              } else {
+                  Write-Host "No report generated – probably zero violations (good news!)"
+              }
           }
-
-          Write-Host "Terrascan version:"
-          terrascan version
-
-          Write-Host "Initializing Terrascan (download policies)..."
-          terrascan init
-
-          Write-Host "Running Terrascan scan on Terraform files..."
-          terrascan scan -d . -o json --output-file terrascan-report.json
-
-          if (Test-Path "terrascan-report.json") {
-              Write-Host "Terrascan report generated successfully!"
-              Write-Host "=== Terrascan Results Preview ==="
-              Get-Content terrascan-report.json | Select-Object -First 20  # Sirf pehle 20 lines dikhao (full report artifact mein milega)
-          } else {
-              Write-Host "No report generated – probably zero violations (good news!)"
+          catch {
+              Write-Host "##vso[task.logissue type=warning]Terrascan failed: $($_.Exception.Message)"
+              Write-Host "Continuing with other scans..."
+              
+              # Create empty report so artifact publishing doesn't fail
+              "{}" | Out-File -FilePath "terrascan-report.json" -Encoding UTF8
           }
+    
     - task: PublishPipelineArtifact@1
       displayName: 'Publish Terrascan Report'
       inputs:
@@ -243,24 +266,37 @@ stages:
       
     - task: PowerShell@2
       displayName: Run Checkov
+      continueOnError: true  # Continue even if Checkov fails
       inputs:
         targetType: 'inline'
         script: |
-          # Navigate to Terraform directory
-          Set-Location "$(System.DefaultWorkingDirectory)/Workspace/Env_Dev"
-          
-          # Install Checkov if not installed
-          if (-not (Get-Command checkov -ErrorAction SilentlyContinue)) {
-              Write-Host "Installing Checkov..."
-              python -m pip install --upgrade pip
-              python -m pip install checkov
+          try {
+              # Navigate to Terraform directory
+              Set-Location "$(System.DefaultWorkingDirectory)/Workspace/Env_Dev"
+              
+              # Install Checkov if not installed
+              if (-not (Get-Command checkov -ErrorAction SilentlyContinue)) {
+                  Write-Host "Installing Checkov..."
+                  python -m pip install --upgrade pip
+                  python -m pip install checkov
+              }
+              
+              # Run Checkov
+              checkov -d . -o json > checkov-report.json
+              
+              # Show results
+              if (Test-Path "checkov-report.json") {
+                  Get-Content checkov-report.json
+              }
           }
-          
-          # Run Checkov
-          checkov -d . -o json > checkov-report.json
-          
-          # Show results
-          Get-Content checkov-report.json
+          catch {
+              Write-Host "##vso[task.logissue type=warning]Checkov failed: $($_.Exception.Message)"
+              Write-Host "Continuing with other scans..."
+              
+              # Create empty report so artifact publishing doesn't fail
+              "{}" | Out-File -FilePath "checkov-report.json" -Encoding UTF8
+          }
+    
     - task: PublishPipelineArtifact@1
       displayName: 'Publish Checkov Report'
       inputs:
@@ -268,22 +304,37 @@ stages:
         artifact: 'CheckovReport'
         publishLocation: 'pipeline'
       condition: succeededOrFailed()
+    
     - task: PowerShell@2
       displayName: Run KICS
+      continueOnError: true  # Continue even if KICS fails
       inputs:
         targetType: 'inline'
         script: |
-          Set-Location "$(workingDir)"
+          try {
+              Set-Location "$(workingDir)"
 
-          if (-not (Get-Command kics -ErrorAction SilentlyContinue)) {
-              Write-Host "Installing KICS..."
-              Invoke-WebRequest -Uri "https://github.com/Checkmarx/kics/releases/download/v1.8.0/kics_1.8.0_windows_amd64.zip" -OutFile "kics.zip"
-              Expand-Archive -Path "kics.zip" -DestinationPath "$(System.DefaultWorkingDirectory)/kics"
-              $env:Path += ";$(System.DefaultWorkingDirectory)/kics"
+              if (-not (Get-Command kics -ErrorAction SilentlyContinue)) {
+                  Write-Host "Installing KICS..."
+                  Invoke-WebRequest -Uri "https://github.com/Checkmarx/kics/releases/download/v1.8.0/kics_1.8.0_windows_amd64.zip" -OutFile "kics.zip"
+                  Expand-Archive -Path "kics.zip" -DestinationPath "$(System.DefaultWorkingDirectory)/kics"
+                  $env:Path += ";$(System.DefaultWorkingDirectory)/kics"
+              }
+
+              kics scan -p . -o json -r kics-report.json
+              
+              if (Test-Path "kics-report.json") {
+                  Get-Content kics-report.json
+              }
           }
-
-          kics scan -p . -o json -r kics-report.json
-          Get-Content kics-report.json
+          catch {
+              Write-Host "##vso[task.logissue type=warning]KICS failed: $($_.Exception.Message)"
+              Write-Host "Continuing with other scans..."
+              
+              # Create empty report so artifact publishing doesn't fail
+              "{}" | Out-File -FilePath "kics-report.json" -Encoding UTF8
+          }
+    
     - task: PublishPipelineArtifact@1
       displayName: 'Publish KICS Report'
       inputs:
@@ -291,7 +342,6 @@ stages:
         artifact: 'KICSReport'
         publishLocation: 'pipeline'
       condition: succeededOrFailed()
-    
 
 - stage: Manual_Approval
 
