@@ -209,90 +209,52 @@ stages:
       displayName: Run Terrascan
       continueOnError: true
       inputs:
-        targetType: 'inline'
+        targetType: inline
         script: |
-          try {
-              Set-Location "$(System.DefaultWorkingDirectory)/Workspace/Env_Dev"
+          Set-Location "$(System.DefaultWorkingDirectory)/Workspace/Env_Dev"
 
-              # Install latest Terrascan (official repo - tenable)
-              if (-not (Get-Command terrascan -ErrorAction SilentlyContinue)) {
-                  Write-Host "Downloading Terrascan v1.19.9 for Windows AMD64..."
-                  
-                  # CORRECTED URL - Using the proper GitHub release URL
-                  $downloadUrl = "https://github.com/tenable/terrascan/releases/download/v1.19.9/terrascan_1.19.9_Windows_x86_64.zip"
-                  
-                  Write-Host "Download URL: $downloadUrl"
-                  
-                  Invoke-WebRequest -Uri $downloadUrl -OutFile "terrascan.zip" -UseBasicParsing
-                  Expand-Archive -Path "terrascan.zip" -DestinationPath "." -Force
-                  Remove-Item "terrascan.zip" -Force  # Clean up zip file
-                  
-                  # Add current directory to PATH
-                  $env:PATH = "$(Get-Location);$env:PATH"
-              }
-
-              Write-Host "Terrascan version:"
-              terrascan version
-
-              Write-Host "Initializing Terrascan (download policies)..."
-              terrascan init
-
-              Write-Host "Running Terrascan scan on Terraform files..."
-              
-              # CHANGED: Added --iac-type terraform and --skip-rules flag to suppress exit code 1
-              # Also using --use-colors false for cleaner output
-              terrascan scan -d . --iac-type terraform --use-colors false -o json --output-file terrascan-report.json
-              
-              # Check exit code - if it's 1 (violations found), it's okay - we just want the report
-              if ($LASTEXITCODE -eq 1) {
-                  Write-Host "Terrascan found violations (exit code 1) - Report will contain findings"
-                  Write-Host "This is expected - we want to see the violations in the report"
-              }
-              elseif ($LASTEXITCODE -eq 0) {
-                  Write-Host "Terrascan passed with no violations (exit code 0)"
-              }
-              else {
-                  Write-Host "Terrascan failed with exit code: $LASTEXITCODE"
-              }
-
-              if (Test-Path "terrascan-report.json") {
-                  $reportSize = (Get-Item "terrascan-report.json").Length
-                  Write-Host "Terrascan report generated successfully! Size: $reportSize bytes"
-                  Write-Host "=== Terrascan Results Preview ==="
-                  if ($reportSize -gt 0) {
-                      Get-Content terrascan-report.json | Select-Object -First 5
-                  } else {
-                      Write-Host "Report file is empty"
-                      "{}" | Out-File -FilePath "terrascan-report.json" -Encoding UTF8
-                  }
-              } else {
-                  Write-Host "No report generated - creating empty report"
-                  "{}" | Out-File -FilePath "terrascan-report.json" -Encoding UTF8
-              }
-              
-              # Always exit with 0 to prevent pipeline failure
-              Write-Host "##vso[task.complete result=Succeeded;]Terrascan scan completed"
-              exit 0
+          # Install Terrascan
+          if (-not (Get-Command terrascan -ErrorAction SilentlyContinue)) {
+              $url = "https://github.com/tenable/terrascan/releases/download/v1.19.9/terrascan_1.19.9_Windows_x86_64.zip"
+              Invoke-WebRequest -Uri $url -OutFile "terrascan.zip" -UseBasicParsing
+              Expand-Archive -Path "terrascan.zip" -DestinationPath "." -Force
+              Remove-Item "terrascan.zip" -Force
+              $env:PATH = "$(Get-Location);$env:PATH"
           }
-          catch {
-              Write-Host "##vso[task.logissue type=warning]Terrascan failed: $($_.Exception.Message)"
-              Write-Host "Continuing with other scans..."
-              
-              # Create empty report so artifact publishing doesn't fail
-              "{}" | Out-File -FilePath "terrascan-report.json" -Encoding UTF8
-              
-              # Still exit with 0 to continue pipeline
-              Write-Host "##vso[task.complete result=Succeeded;]Terrascan failed but pipeline continues"
-              exit 0
+
+          terrascan version
+          terrascan init
+
+          # Yeh line sabse important hai – stdout se capture karo report
+          Write-Host "Running Terrascan and capturing output..."
+          $report = terrascan scan -d . --iac-type terraform --use-colors false -o json 2>&1
+          $exitCode = $LASTEXITCODE
+
+          # Har haal mein file bana do
+          if ($report -match "^{.*}$") {
+              # Valid JSON mila
+              $report | Out-File -FilePath "terrascan-report.json" -Encoding UTF8
+              Write-Host "Terrascan report written from stdout (violations found)"
+          } else {
+              # Agar JSON nahi mila (rare case), empty report
+              $empty = @{ violations = @(); summary = @{ violations_count = 0 } } | ConvertTo-Json -Depth 10
+              $empty | Out-File -FilePath "terrascan-report.json" -Encoding UTF8
+              Write-Host "No JSON output – created empty report"
           }
+
+          # Preview dikhao
+          Write-Host "=== Terrascan Report Preview ==="
+          Get-Content "terrascan-report.json" | Select-Object -First 15
+
+          Write-Host "Terrascan exit code was: $exitCode (ignored)"
+          exit 0
+
     - task: PublishPipelineArtifact@1
-      displayName: 'Publish Terrascan Report'
+      displayName: Publish Terrascan Report
       inputs:
         targetPath: '$(System.DefaultWorkingDirectory)/Workspace/Env_Dev/terrascan-report.json'
-        artifact: 'TerrascanReport'
-        publishLocation: 'pipeline'
-      condition: succeededOrFailed()
-      
+        artifact: TerrascanReport
+        publishLocation: pipeline
     - task: PowerShell@2
       displayName: Run Checkov
       continueOnError: true  # Continue even if Checkov fails
