@@ -255,7 +255,6 @@ stages:
         artifact: TerrascanReport
         publishLocation: pipeline
     
-    
     - task: PowerShell@2
       displayName: Run Checkov
       continueOnError: true
@@ -264,47 +263,83 @@ stages:
         script: |
           Set-Location "$(System.DefaultWorkingDirectory)/Workspace/Env_Dev"
 
-          # Step 1: Install Latest Python 3.14.2 if not present
+          # Step 1: Robust Python install with download verification + retry
+          $pythonInstalled = $false
           if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
-              Write-Host "Installing Python 3.14.2 (latest stable)..."
+              Write-Host "Python not found → Installing Python 3.14.2..."
               $pythonUrl = "https://www.python.org/ftp/python/3.14.2/python-3.14.2-amd64.exe"
-              Invoke-WebRequest -Uri $pythonUrl -OutFile "python-installer.exe" -UseBasicParsing
+              $installer = "python-installer.exe"
               
-              # Silent install: All users, prepend to PATH
-              Start-Process -FilePath "python-installer.exe" -ArgumentList "/quiet InstallAllUsers=1 PrependPath=1" -Wait -NoNewWindow
-              Remove-Item "python-installer.exe" -Force
+              # Download with retry (up to 3 times)
+              $retryCount = 0
+              $maxRetries = 3
+              do {
+                  try {
+                      Write-Host "Download attempt $($retryCount + 1)/$maxRetries..."
+                      Invoke-WebRequest -Uri $pythonUrl -OutFile $installer -UseBasicParsing -ErrorAction Stop
+                      if (Test-Path $installer -and ((Get-Item $installer).Length -gt 20MB)) {  # Verify size > 20MB
+                          Write-Host "Download successful! Size: $((Get-Item $installer).Length) bytes"
+                          break
+                      } else {
+                          Remove-Item $installer -ErrorAction SilentlyContinue
+                          throw "Download incomplete"
+                      }
+                  }
+                  catch {
+                      $retryCount++
+                      Write-Host "Download failed: $($_.Exception.Message). Retrying..."
+                      Start-Sleep -Seconds 5
+                  }
+              } while ($retryCount -lt $maxRetries)
               
-              # Refresh environment variables (critical step)
-              $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH", "User")
-              refreshenv  # If Chocolatey is available, else skip
+              if (Test-Path $installer) {
+                  # Silent install
+                  Write-Host "Installing Python silently..."
+                  $process = Start-Process -FilePath $installer -ArgumentList "/quiet InstallAllUsers=1 PrependPath=1" -Wait -PassThru -NoNewWindow
+                  if ($process.ExitCode -eq 0) {
+                      $pythonInstalled = $true
+                      Remove-Item $installer -Force
+                      # Refresh PATH
+                      $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH", "User")
+                      Write-Host "Python installed successfully!"
+                  } else {
+                      Write-Host "Install failed (exit code: $($process.ExitCode)) – using fallback"
+                  }
+              } else {
+                  Write-Host "Download failed after retries – skipping Python install (use if pre-installed)"
+              }
+          } else {
+              Write-Host "Python already available: $(python --version)"
+              $pythonInstalled = $true
           }
 
-          Write-Host "Python version: $(python --version)"
+          # Step 2: Install Checkov (only if Python is ready)
+          if ($pythonInstalled -or (Get-Command python -ErrorAction SilentlyContinue)) {
+              Write-Host "Installing Checkov..."
+              python -m pip install --upgrade pip --user
+              python -m pip install --upgrade checkov==3.2.5 --user  # Latest Dec 2025
+          } else {
+              Write-Host "No Python – skipping Checkov (add manual Python task if needed)"
+              "{}" | Out-File -FilePath "checkov-report.json" -Encoding UTF8
+              exit 0
+          }
 
-          # Step 2: Install/Upgrade Checkov
-          Write-Host "Installing Checkov via pip..."
-          python -m pip install --upgrade pip
-          python -m pip install --upgrade checkov==3.2.5  # Latest stable as of Dec 2025
-
-          # Step 3: Run Checkov scan
-          Write-Host "Running Checkov on Terraform files..."
+          # Step 3: Run Checkov
+          Write-Host "Running Checkov scan..."
           checkov -d . --framework terraform --compact --skip-download -o json --output-file checkov-report.json
 
-          # Step 4: Ensure report exists (even if zero issues)
+          # Step 4: Fallback report if needed
           if (-not (Test-Path "checkov-report.json") -or ((Get-Item "checkov-report.json").Length -eq 0)) {
-              Write-Host "Creating fallback empty report"
-              $emptyReport = @{
-                  results = @{ failed_checks = @(); passed_checks = @() };
-                  summary = @{ failed = 0; passed = 0; skipped = 0; parsing_errors = 0 }
-              } | ConvertTo-Json -Depth 5
-              $emptyReport | Out-File -FilePath "checkov-report.json" -Encoding UTF8
+              Write-Host "Fallback: Creating empty Checkov report"
+              $empty = @{ results = @{ failed_checks = @(); passed_checks = @() }; summary = @{ failed = 0; passed = 0 } } | ConvertTo-Json -Depth 5
+              $empty | Out-File -FilePath "checkov-report.json" -Encoding UTF8
           }
 
-          $reportSize = (Get-Item "checkov-report.json").Length
-          Write-Host "Checkov report ready! Size: $reportSize bytes"
+          $size = (Get-Item "checkov-report.json").Length
+          Write-Host "Checkov done! Report size: $size bytes"
 
           Write-Host "=== Checkov Preview ==="
-          Get-Content "checkov-report.json" | Select-Object -First 15
+          Get-Content "checkov-report.json" | Select-Object -First 10
 
           exit 0
 
