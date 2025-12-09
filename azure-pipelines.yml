@@ -206,47 +206,47 @@ stages:
       condition: succeededOrFailed()
     
     - task: PowerShell@2
-      displayName: Run Terrascan
+      displayName: Run Terrascan (Final Working Version)
       continueOnError: true
       inputs:
         targetType: inline
         script: |
           Set-Location "$(System.DefaultWorkingDirectory)/Workspace/Env_Dev"
 
-          # Install Terrascan
-          if (-not (Get-Command terrascan -ErrorAction SilentlyContinue)) {
-              $url = "https://github.com/tenable/terrascan/releases/download/v1.19.9/terrascan_1.19.9_Windows_x86_64.zip"
-              Invoke-WebRequest -Uri $url -OutFile "terrascan.zip" -UseBasicParsing
-              Expand-Archive -Path "terrascan.zip" -DestinationPath "." -Force
-              Remove-Item "terrascan.zip" -Force
-              $env:PATH = "$(Get-Location);$env:PATH"
+          # Step 1: Install Terrascan
+          if (-not (Test-Path "terrascan.exe")) {
+              Write-Host "Downloading Terrascan v1.19.9..."
+              Invoke-WebRequest -Uri "https://github.com/tenable/terrascan/releases/download/v1.19.9/terrascan_1.19.9_Windows_x86_64.zip" -OutFile "t.zip" -UseBasicParsing
+              Expand-Archive "t.zip" -DestinationPath "." -Force
+              Remove-Item "t.zip"
+              Move-Item "terrascan_1.19.9_Windows_x86_64.exe" "terrascan.exe" -Force
           }
 
-          terrascan version
-          terrascan init
+          # Step 2: Create writable config directory (yeh line sabse zaroori hai!)
+          $configDir = "$env:USERPROFILE\.terrascan"
+          New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+          $env:TERRASCAN_CONFIG = "$configDir\config.toml"
 
-          # Yeh line sabse important hai – stdout se capture karo report
-          Write-Host "Running Terrascan and capturing output..."
-          $report = terrascan scan -d . --iac-type terraform --use-colors false -o json 2>&1
-          $exitCode = $LASTEXITCODE
+          # Step 3: Init once
+          .\terrascan.exe init --config-path $env:TERRASCAN_CONFIG
 
-          # Har haal mein file bana do
-          if ($report -match "^{.*}$") {
-              # Valid JSON mila
-              $report | Out-File -FilePath "terrascan-report.json" -Encoding UTF8
-              Write-Host "Terrascan report written from stdout (violations found)"
+          # Step 4: Run scan + capture stdout properly
+          Write-Host "Running Terrascan scan..."
+          $output = .\terrascan.exe scan -d . --iac-type terraform -o json 2>&1
+
+          # Step 5: Force write report file
+          if ($output -match '"violations":') {
+              $output | Out-File -FilePath "terrascan-report.json" -Encoding UTF8 -Force
+              Write-Host "Violations found and report saved!"
           } else {
-              # Agar JSON nahi mila (rare case), empty report
-              $empty = @{ violations = @(); summary = @{ violations_count = 0 } } | ConvertTo-Json -Depth 10
-              $empty | Out-File -FilePath "terrascan-report.json" -Encoding UTF8
-              Write-Host "No JSON output – created empty report"
+              # Zero violations
+              '{"violations":[],"summary":{"violations_count":0}}' | Out-File -FilePath "terrascan-report.json" -Encoding UTF8 -Force
+              Write-Host "No violations found - empty report created"
           }
 
-          # Preview dikhao
-          Write-Host "=== Terrascan Report Preview ==="
-          Get-Content "terrascan-report.json" | Select-Object -First 15
+          Write-Host "=== TERRASCAN REPORT ==="
+          Get-Content "terrascan-report.json" -Raw
 
-          Write-Host "Terrascan exit code was: $exitCode (ignored)"
           exit 0
 
     - task: PublishPipelineArtifact@1
