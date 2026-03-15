@@ -1,9 +1,3 @@
-<div align="center">
-  <img src="https://img.shields.io/badge/Terraform-Enterprise-7B42BC?style=for-the-badge&logo=terraform&logoColor=white" alt="Terraform">
-  <img src="https://img.shields.io/badge/Azure-Landing%20Zone-0078D4?style=for-the-badge&logo=microsoftazure&logoColor=white" alt="Azure">
-  <img src="https://img.shields.io/badge/DevSecOps-Ready-0A66C2?style=for-the-badge&logo=azuredevops&logoColor=white" alt="DevSecOps">
-</div>
-
 <h1 align="center">🚀 Azure Enterprise Platform Foundation</h1>
 
 <p align="center">
